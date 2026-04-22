@@ -24,10 +24,7 @@ jobs:
         cache: 'npm'
 
     - name: Install dependencies
-      run: npm install
-
-    - name: Generate data from CSV
-      run: npm run generate-data
+      run: npm ci
 
     - name: Build
       run: npm run build
