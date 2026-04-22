@@ -3,8 +3,19 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, 
   PieChart, Pie, Cell, Legend 
 } from 'recharts';
-import { AlertTriangle, Server, Cloud, Users, FileText, Activity, Filter, LayoutGrid } from 'lucide-react';
+import { AlertTriangle, Server, Cloud, Users, FileText, Activity, Filter, LayoutGrid, LogOut } from 'lucide-react';
 import { CSV_DATA } from './data/csvData.js';
+
+const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || '';
+
+function parseJwt(token) {
+  try {
+    const base64 = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
+    return JSON.parse(atob(base64));
+  } catch {
+    return null;
+  }
+}
 
 // Dicionário NLP - Remoção de jargões para garantir qualidade no agrupamento dos Temas
 const stopwords = new Set(["o", "a", "os", "as", "um", "uma", "de", "do", "da", "dos", "das", "em", "no", "na", 
@@ -37,6 +48,9 @@ const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4'
 const VERTICAIS_EXCLUIDAS = new Set(['sistemas internos', 'não informada', 'plataforma']);
 
 export default function App() {
+  const [user, setUser] = useState(null);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [authError, setAuthError] = useState('');
   const [data, setData] = useState(null);
   const [temaSelecionado, setTemaSelecionado] = useState(null);
   
@@ -44,10 +58,66 @@ export default function App() {
   const [filtroVertical, setFiltroVertical] = useState('Todas');
   const [filtroSistema, setFiltroSistema] = useState('Todos');
 
+  // Auth: verificar sessão salva ao montar
+  useEffect(() => {
+    const saved = localStorage.getItem('betha_user');
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (parsed.email?.endsWith('@betha.com.br')) {
+          setUser(parsed);
+        } else {
+          localStorage.removeItem('betha_user');
+        }
+      } catch {
+        localStorage.removeItem('betha_user');
+      }
+    }
+    setAuthLoading(false);
+  }, []);
+
+  // Auth: inicializar Google Identity Services
+  useEffect(() => {
+    if (user || authLoading) return;
+    const init = () => {
+      if (!window.google || !GOOGLE_CLIENT_ID) return;
+      window.google.accounts.id.initialize({
+        client_id: GOOGLE_CLIENT_ID,
+        callback: (response) => {
+          const payload = parseJwt(response.credential);
+          if (!payload) { setAuthError('Falha ao processar credencial.'); return; }
+          if (!payload.email?.endsWith('@betha.com.br')) {
+            setAuthError('Acesso restrito a contas @betha.com.br.');
+            window.google.accounts.id.disableAutoSelect();
+            return;
+          }
+          const userData = { email: payload.email, name: payload.name, picture: payload.picture };
+          localStorage.setItem('betha_user', JSON.stringify(userData));
+          setAuthError('');
+          setUser(userData);
+        },
+      });
+      const btn = document.getElementById('google-signin-btn');
+      if (btn) {
+        window.google.accounts.id.renderButton(btn, {
+          theme: 'outline', size: 'large', text: 'signin_with', locale: 'pt-BR',
+        });
+      }
+    };
+    if (window.google) { init(); } else { window.addEventListener('load', init); }
+    return () => window.removeEventListener('load', init);
+  }, [user, authLoading]);
+
   // Carregar dados ao montar o componente
   useEffect(() => {
     processData(CSV_DATA);
   }, []);
+
+  function handleLogout() {
+    localStorage.removeItem('betha_user');
+    setUser(null);
+    if (window.google) window.google.accounts.id.disableAutoSelect();
+  }
 
   // Lógica dos Filtros movida para ANTES do return condicional para respeitar as Rules of Hooks do React
   const verticaisUnicas = useMemo(() => {
@@ -163,6 +233,41 @@ export default function App() {
     setFiltroSistema('Todos');
   };
 
+  // Tela de carregamento / login
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+        <div className="animate-spin h-8 w-8 border-4 border-indigo-600 border-t-transparent rounded-full" />
+      </div>
+    );
+  }
+
+  if (!user) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-100 to-indigo-50 flex items-center justify-center p-6">
+        <div className="bg-white rounded-2xl shadow-xl border border-slate-100 p-10 max-w-sm w-full text-center">
+          <div className="flex justify-center mb-4">
+            <div className="p-4 bg-indigo-100 rounded-full">
+              <Activity className="h-10 w-10 text-indigo-600" />
+            </div>
+          </div>
+          <h1 className="text-2xl font-bold text-slate-900 mb-1">Análise de Melhorias</h1>
+          <p className="text-slate-500 text-sm mb-8">Acesso restrito a colaboradores Betha Sistemas.<br/>Faça login com sua conta <span className="font-semibold text-indigo-600">@betha.com.br</span>.</p>
+          {authError && (
+            <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">{authError}</div>
+          )}
+          {!GOOGLE_CLIENT_ID ? (
+            <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-amber-700 text-sm">
+              Variável <code>VITE_GOOGLE_CLIENT_ID</code> não configurada.
+            </div>
+          ) : (
+            <div id="google-signin-btn" className="flex justify-center" />
+          )}
+        </div>
+      </div>
+    );
+  }
+
   // Ecrã Principal do Dashboard
   return (
     <div className="min-h-screen bg-slate-50 p-6 font-sans text-slate-800">
@@ -176,6 +281,13 @@ export default function App() {
           <p className="text-slate-500 mt-2 text-lg">
             Dashboard com análise automática de todos os dados integrados.
           </p>
+        </div>
+        <div className="flex items-center gap-3">
+          {user.picture && <img src={user.picture} alt={user.name} className="w-8 h-8 rounded-full border border-slate-200" referrerPolicy="no-referrer" />}
+          <span className="text-sm text-slate-600 hidden md:block">{user.name}</span>
+          <button onClick={handleLogout} title="Sair" className="flex items-center gap-1 text-sm text-slate-500 hover:text-red-600 px-3 py-1.5 rounded-lg border border-slate-200 hover:border-red-200 transition-colors">
+            <LogOut className="h-4 w-4" /> Sair
+          </button>
         </div>
       </header>
 
@@ -351,7 +463,9 @@ export default function App() {
                   <tbody>
                     {chamadosDoTema.map((chamado, idx) => (
                       <tr key={chamado.key || idx} className={idx % 2 === 0 ? 'bg-white' : 'bg-slate-50'}>
-                        <td className="px-4 py-2 font-mono text-xs text-indigo-600 whitespace-nowrap">{chamado.key}</td>
+                        <td className="px-4 py-2 font-mono text-xs whitespace-nowrap">
+                          <a href={`https://atendimento.betha.com.br/browse/${chamado.key}`} target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:text-indigo-800 hover:underline">{chamado.key}</a>
+                        </td>
                         <td className="px-4 py-2 text-slate-700 max-w-xs truncate" title={chamado.summary}>{chamado.summary}</td>
                         <td className="px-4 py-2 text-slate-600 whitespace-nowrap">{chamado.vertical}</td>
                         <td className="px-4 py-2 text-slate-600 whitespace-nowrap">{chamado.sistema}</td>
