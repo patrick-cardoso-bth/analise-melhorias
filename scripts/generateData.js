@@ -1,13 +1,13 @@
 import fs from 'fs';
 import path from 'path';
-import { parse } from 'csv-parse/sync';
+import { parse as csvParse } from 'csv-parse/sync';
 
 // Ler o CSV
 const csvPath = path.join(process.cwd(), 'melhorias_abertas_completo.csv');
 const csvContent = fs.readFileSync(csvPath, 'utf-8');
 
 // Parsear CSV
-const records = parse(csvContent, {
+const records = csvParse(csvContent, {
   columns: true,
   skip_empty_lines: true,
 });
