@@ -34,8 +34,11 @@ function extrairTema(summary, description) {
 
 const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#ec4899', '#f97316', '#6366f1', '#14b8a6'];
 
+const VERTICAIS_EXCLUIDAS = new Set(['sistemas internos', 'não informada', 'plataforma']);
+
 export default function App() {
   const [data, setData] = useState(null);
+  const [temaSelecionado, setTemaSelecionado] = useState(null);
   
   // Filtros do Dashboard
   const [filtroVertical, setFiltroVertical] = useState('Todas');
@@ -85,10 +88,21 @@ export default function App() {
       .slice(0, 10);
   }, [filtroVertical, filtroSistema, data]);
 
+  const chamadosDoTema = useMemo(() => {
+    if (!temaSelecionado || !data?.rawCloud) return [];
+    let filtrados = data.rawCloud.filter(d => extrairTema(d.summary, d.description) === temaSelecionado);
+    if (filtroVertical !== 'Todas') filtrados = filtrados.filter(d => d.vertical === filtroVertical);
+    if (filtroSistema !== 'Todos') filtrados = filtrados.filter(d => d.sistema === filtroSistema);
+    return filtrados;
+  }, [temaSelecionado, filtroVertical, filtroSistema, data]);
+
   const processData = (parsedData) => {
     // 1. Isolar Sistemas Desktop
     const desktop = parsedData.filter(d => d.sistema && d.sistema.toLowerCase().includes('desktop'));
-    const cloud = parsedData.filter(d => !(d.sistema && d.sistema.toLowerCase().includes('desktop')));
+    let cloud = parsedData.filter(d => !(d.sistema && d.sistema.toLowerCase().includes('desktop')));
+
+    // 2. Excluir verticais indesejadas
+    cloud = cloud.filter(d => !VERTICAIS_EXCLUIDAS.has((d.vertical || '').toLowerCase().trim()));
 
     // 2. Ranking de Entidades (Cloud)
     const entidadesMap = {};
@@ -140,7 +154,8 @@ export default function App() {
       entidadesDistintas: Object.keys(entidadesMap).length,
       topEntidades,
       distribuicaoVertical,
-      baseTemasCloud
+      baseTemasCloud,
+      rawCloud: cloud,
     });
     
     // Reseta filtros
@@ -283,12 +298,24 @@ export default function App() {
           <div className="h-80">
             {dadosGraficoTemas.length > 0 ? (
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={dadosGraficoTemas} margin={{ top: 20, right: 30, left: 20, bottom: 25 }}>
+                <BarChart data={dadosGraficoTemas} margin={{ top: 20, right: 30, left: 20, bottom: 25 }}
+                  onClick={(e) => {
+                    if (e && e.activePayload && e.activePayload[0]) {
+                      const tema = e.activePayload[0].payload.tema;
+                      setTemaSelecionado(prev => prev === tema ? null : tema);
+                    }
+                  }}
+                  style={{ cursor: 'pointer' }}
+                >
                   <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
                   <XAxis dataKey="tema" tick={{fontSize: 12, fill: '#475569'}} interval={0} angle={-15} textAnchor="end" height={60} />
                   <YAxis tick={{fill: '#475569'}} />
                   <RechartsTooltip cursor={{fill: '#f8fafc'}} contentStyle={{borderRadius: '8px', border: '1px solid #e2e8f0', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)'}} />
-                  <Bar dataKey="quantidade" name="Chamados Agrupados" fill="#8b5cf6" radius={[4, 4, 0, 0]} barSize={40} label={{ position: 'top', fill: '#64748b', fontSize: 12, fontWeight: 'bold' }} />
+                  <Bar dataKey="quantidade" name="Chamados Agrupados" radius={[4, 4, 0, 0]} barSize={40} label={{ position: 'top', fill: '#64748b', fontSize: 12, fontWeight: 'bold' }}>
+                    {dadosGraficoTemas.map((entry) => (
+                      <Cell key={entry.tema} fill={entry.tema === temaSelecionado ? '#6d28d9' : '#8b5cf6'} />
+                    ))}
+                  </Bar>
                 </BarChart>
               </ResponsiveContainer>
             ) : (
@@ -298,6 +325,44 @@ export default function App() {
               </div>
             )}
           </div>
+
+          {temaSelecionado && chamadosDoTema.length > 0 && (
+            <div className="mt-6 border-t border-slate-100 pt-6">
+              <div className="flex items-center justify-between mb-3">
+                <h4 className="text-base font-bold text-slate-800">
+                  Chamados do tema: <span className="text-indigo-600">{temaSelecionado}</span>
+                  <span className="ml-2 text-sm font-normal text-slate-500">({chamadosDoTema.length} chamados)</span>
+                </h4>
+                <button onClick={() => setTemaSelecionado(null)} className="text-xs text-slate-400 hover:text-slate-600 px-2 py-1 rounded border border-slate-200 hover:border-slate-300">
+                  ✕ Fechar
+                </button>
+              </div>
+              <div className="overflow-auto max-h-80 rounded-lg border border-slate-200">
+                <table className="w-full text-sm text-left">
+                  <thead className="bg-slate-50 text-slate-600 sticky top-0">
+                    <tr>
+                      <th className="px-4 py-2 font-semibold border-b border-slate-200">Chave</th>
+                      <th className="px-4 py-2 font-semibold border-b border-slate-200">Resumo</th>
+                      <th className="px-4 py-2 font-semibold border-b border-slate-200">Vertical</th>
+                      <th className="px-4 py-2 font-semibold border-b border-slate-200">Sistema</th>
+                      <th className="px-4 py-2 font-semibold border-b border-slate-200">Entidade</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {chamadosDoTema.map((chamado, idx) => (
+                      <tr key={chamado.key || idx} className={idx % 2 === 0 ? 'bg-white' : 'bg-slate-50'}>
+                        <td className="px-4 py-2 font-mono text-xs text-indigo-600 whitespace-nowrap">{chamado.key}</td>
+                        <td className="px-4 py-2 text-slate-700 max-w-xs truncate" title={chamado.summary}>{chamado.summary}</td>
+                        <td className="px-4 py-2 text-slate-600 whitespace-nowrap">{chamado.vertical}</td>
+                        <td className="px-4 py-2 text-slate-600 whitespace-nowrap">{chamado.sistema}</td>
+                        <td className="px-4 py-2 text-slate-600 whitespace-nowrap">{chamado.entidade}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
