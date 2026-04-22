@@ -1,0 +1,19 @@
+# Vite
+dist/
+.vite/
+
+# Dependencies
+node_modules/
+package-lock.json
+yarn.lock
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Generated
+src/data/csvData.js
