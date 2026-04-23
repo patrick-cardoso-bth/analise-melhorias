@@ -18,29 +18,67 @@ function parseJwt(token) {
 }
 
 // Dicionário NLP - Remoção de jargões para garantir qualidade no agrupamento dos Temas
-const stopwords = new Set(["o", "a", "os", "as", "um", "uma", "de", "do", "da", "dos", "das", "em", "no", "na", 
-  "para", "com", "sem", "que", "e", "é", "por", "como", "ao", "aos", "ou", "se", "nao", "não", "mais", "mas", 
-  "pelo", "pela", "sobre", "novo", "nova", "inclusão", "inserir", "erro", "cliente", "solicita", "solicitação", 
-  "necessidade", "sistema", "melhoria", "deseja", "opção", "onde", "quando", "após", "ser", "já", "ainda", "está", 
-  "estão", "ter", "fazer", "ver", "tela", "pois", "sendo", "assim", "apenas", "também", "através", "forma", "todos", 
-  "todas", "descrição", "passos", "simulação", "motivo", "sugestão", "alega", "neste", "desta", "deste", "favor"]);
+const stopwords = new Set([
+  // Artigos, preposições e conjunções
+  "o", "a", "os", "as", "um", "uma", "de", "do", "da", "dos", "das", "em", "no", "na",
+  "para", "com", "sem", "que", "e", "é", "por", "como", "ao", "aos", "ou", "se", "nao", "não", "mais", "mas",
+  "pelo", "pela", "sobre", "novo", "nova", "neste", "desta", "deste", "favor", "pois", "sendo", "assim",
+  "apenas", "também", "através", "todos", "todas", "ter", "fazer", "ver", "após", "ser", "já", "ainda",
+  "está", "estão", "onde", "quando", "alega",
+  // Jargões de template de chamado
+  "inclusão", "inserir", "erro", "cliente", "solicita", "solicitação", "necessidade", "melhoria",
+  "deseja", "opção", "descrição", "passos", "simulação", "motivo", "sugestão",
+  // Vocabulário genérico do domínio ERP municipal (sem valor discriminativo)
+  "cadastro", "emissão", "relatório", "lançamento", "consulta", "campo", "verificar",
+  "informar", "possível", "permite", "gerado", "arquivo", "data", "valor", "número",
+  "tela", "forma", "botão", "filtro", "lista", "acesso", "processo", "rotina",
+  "usuário", "usuários", "salvar", "gravar", "exibir", "mostrar", "apresentar",
+  "retornar", "retorna", "gerar", "gera", "imprimir", "imprime", "alterar", "altera",
+  "atualizar", "atualiza", "excluir", "exclui", "incluir", "inclui", "listar"
+]);
 
-// Algoritmo de extração do Tema focado no título + descrição
+// Remove blocos de template fixo das descrições de chamados
+function limparDescricao(text) {
+  return (text || '')
+    .replace(/PASSOS PARA SIMULA[ÇC][ÃA]O\s*:?/gi, ' ')
+    .replace(/DESCRI[ÇC][ÃA]O DA NECESSIDADE\s*:?/gi, ' ')
+    .replace(/Necessidade\s*:\s*[^\n]*/gi, ' ')
+    .replace(/Motivo\s*:\s*[^\n]*/gi, ' ')
+    .replace(/Observa[çc][õo]es\s*:\s*/gi, ' ')
+    .replace(/Descri[çc][ãa]o\s*:\s*/gi, ' ');
+}
+
+// Normalização simples de plurais PT-BR
+function normalizarPalavra(w) {
+  if (w.endsWith('ões')) return w.slice(0, -3) + 'ão';
+  if (w.endsWith('ães')) return w.slice(0, -3) + 'ão';
+  if (w.endsWith('ais')) return w.slice(0, -2) + 'l';
+  if (w.endsWith('eis')) return w.slice(0, -2) + 'l';
+  if (w.endsWith('éis')) return w.slice(0, -2) + 'l';
+  if (w.endsWith('óis')) return w.slice(0, -2) + 'l';
+  if (w.endsWith('uis')) return w.slice(0, -2) + 'l';
+  if (w.endsWith('ntos')) return w.slice(0, -1);
+  if (w.endsWith('ntas')) return w.slice(0, -1);
+  if (w.endsWith('es') && w.length > 4) return w.slice(0, -2);
+  if (w.endsWith('s') && w.length > 4) return w.slice(0, -1);
+  return w;
+}
+
+// Algoritmo de extração do Tema — usado apenas como fallback quando funcionalidade está vazia
 function extrairTema(summary, description) {
-  let text = ((summary || '') + " " + (summary || '') + " " + (description || '')).toLowerCase();
-  text = text.replace(/[^\w\s\u00C0-\u00FF]/g, ' '); // Mantém letras e acentos
-  
-  const words = text.split(/\s+/).filter(w => !stopwords.has(w) && w.length > 2 && isNaN(w));
+  const descLimpa = limparDescricao(description);
+  let text = ((summary || '') + " " + (summary || '') + " " + (summary || '') + " " + descLimpa).toLowerCase();
+  text = text.replace(/[^\w\s\u00C0-\u00FF]/g, ' ');
+  const words = text.split(/\s+/).filter(w => !stopwords.has(w) && w.length > 3 && isNaN(w));
   if (words.length === 0) return "Outros";
-
   const counts = {};
-  for (const w of words) counts[w] = (counts[w] || 0) + 1;
-  
+  for (const w of words) {
+    const raiz = normalizarPalavra(w);
+    counts[raiz] = (counts[raiz] || 0) + 1;
+  }
   const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]);
-  // Extrai as 2 palavras principais com maior relevância no ticket
-  const topWords = sorted.slice(0, 2).map(x => x[0].charAt(0).toUpperCase() + x[0].slice(1));
-  
-  return topWords.join(" ");
+  const topWord = sorted[0][0];
+  return topWord.charAt(0).toUpperCase() + topWord.slice(1);
 }
 
 const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#ec4899', '#f97316', '#6366f1', '#14b8a6'];
@@ -160,7 +198,12 @@ export default function App() {
 
   const chamadosDoTema = useMemo(() => {
     if (!temaSelecionado || !data?.rawCloud) return [];
-    let filtrados = data.rawCloud.filter(d => extrairTema(d.summary, d.description) === temaSelecionado);
+    let filtrados = data.rawCloud.filter(d => {
+      const t = (d.funcionalidade && d.funcionalidade.trim())
+        ? d.funcionalidade.trim()
+        : extrairTema(d.summary, d.description);
+      return t === temaSelecionado;
+    });
     if (filtroVertical !== 'Todas') filtrados = filtrados.filter(d => d.vertical === filtroVertical);
     if (filtroSistema !== 'Todos') filtrados = filtrados.filter(d => d.sistema === filtroSistema);
     return filtrados;
@@ -201,20 +244,38 @@ export default function App() {
       distribuicaoVertical = [...top, { name: 'Outras', value: restValue }];
     }
 
-    // 4. Extração Semântica e Agrupamento de Temas (Cloud)
+    // 4. Agrupamento de Temas (Cloud) — prioriza funcionalidade, NLP como fallback
+    const LIMIAR_MINIMO = 3;
     const temasMap = {};
     cloud.forEach(d => {
       const v = d.vertical || 'Não informada';
       const s = d.sistema || 'Não informado';
-      const t = extrairTema(d.summary, d.description);
-      
+      const t = (d.funcionalidade && d.funcionalidade.trim())
+        ? d.funcionalidade.trim()
+        : extrairTema(d.summary, d.description);
       const key = `${v}|${s}|${t}`;
       if (!temasMap[key]) {
         temasMap[key] = { vertical: v, sistema: s, tema: t, quantidade: 0 };
       }
       temasMap[key].quantidade += 1;
     });
-    const baseTemasCloud = Object.values(temasMap);
+
+    // Agrupa temas com menos de 3 chamados em "Outros"
+    const outrosMap = {};
+    const temasConsolidados = {};
+    Object.values(temasMap).forEach(item => {
+      if (item.quantidade < LIMIAR_MINIMO) {
+        const outrosKey = `${item.vertical}|${item.sistema}|Outros`;
+        if (!outrosMap[outrosKey]) {
+          outrosMap[outrosKey] = { vertical: item.vertical, sistema: item.sistema, tema: 'Outros', quantidade: 0 };
+        }
+        outrosMap[outrosKey].quantidade += item.quantidade;
+      } else {
+        temasConsolidados[`${item.vertical}|${item.sistema}|${item.tema}`] = item;
+      }
+    });
+    const baseTemasCloud = [...Object.values(temasConsolidados), ...Object.values(outrosMap)]
+      .sort((a, b) => b.quantidade - a.quantidade);
 
     // 5. Atualizar Estado
     setData({
