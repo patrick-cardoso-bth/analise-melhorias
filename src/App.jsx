@@ -37,9 +37,20 @@ const stopwords = new Set([
   "atualizar", "atualiza", "excluir", "exclui", "incluir", "inclui", "listar"
 ]);
 
-// Remove blocos de template fixo das descrições de chamados
+// Remove blocos de template fixo e tags Jira das descrições de chamados
 function limparDescricao(text) {
   return (text || '')
+    // Tags Jira: imagens, thumbnails, anexos (!nome.png|thumbnail!)
+    .replace(/![^!\n]{1,200}!/g, ' ')
+    // Blocos Jira: {code}, {noformat}, {panel} e conteúdo interno
+    .replace(/\{(?:code|noformat|panel)[^}]*\}[\s\S]*?\{\/(?:code|noformat|panel)\}/gi, ' ')
+    // Macros Jira inline: {color:red}, {*}, etc.
+    .replace(/\{[^}]{1,50}\}/g, ' ')
+    // Template de dúvida — seções numeradas (1 -, 2 -, 8.1 -, etc.)
+    .replace(/\d+(?:\.\d+)?\s*[-–]\s*(?:Descri[çc][ãa]o da [Dd][úu]vida|Descri[çc][ãa]o do [Ii]ncidente|Entidade|Acesso na entidade|Passos para simula[çc][ãa]o|Evid[êe]ncias?|Necessidade|Cliente|Funcionalidade|Vers[ãa]o do sistema|Base de dados|Token de convers[ãa]o)[^\n]*/gi, ' ')
+    // Frases de instrução dos templates
+    .replace(/(?:Detalhar a d[úu]vida|Caso (?:de )?trate|Habilitar o par[âa]metro|Quais etapas|Qual a necessidade|Descrever brevemente|Entidade utilizada|Disponibilizar o token|Informar os passos|Acessar a tela|Enviar o arqjoblet)[^\n]*/gi, ' ')
+    // Templates antigos
     .replace(/PASSOS PARA SIMULA[ÇC][ÃA]O\s*:?/gi, ' ')
     .replace(/DESCRI[ÇC][ÃA]O DA NECESSIDADE\s*:?/gi, ' ')
     .replace(/Necessidade\s*:\s*[^\n]*/gi, ' ')
@@ -64,21 +75,23 @@ function normalizarPalavra(w) {
   return w;
 }
 
-// Algoritmo de extração do Tema — usado apenas como fallback quando funcionalidade está vazia
+// Algoritmo de extração do Tema (Subject + Action) — fallback quando funcionalidade está vazia
 function extrairTema(summary, description) {
   const descLimpa = limparDescricao(description);
-  let text = ((summary || '') + " " + (summary || '') + " " + (summary || '') + " " + descLimpa).toLowerCase();
-  text = text.replace(/[^\w\s\u00C0-\u00FF]/g, ' ');
+  // Peso quádruplo ao título: subject+action são mais claros no summary
+  let text = ((summary || '') + ' ').repeat(4) + descLimpa;
+  text = text.toLowerCase().replace(/[^\w\s\u00C0-\u00FF]/g, ' ');
   const words = text.split(/\s+/).filter(w => !stopwords.has(w) && w.length > 3 && isNaN(w));
-  if (words.length === 0) return "Outros";
+  if (words.length === 0) return 'Outros';
   const counts = {};
   for (const w of words) {
     const raiz = normalizarPalavra(w);
     counts[raiz] = (counts[raiz] || 0) + 1;
   }
   const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]);
-  const topWord = sorted[0][0];
-  return topWord.charAt(0).toUpperCase() + topWord.slice(1);
+  // Retorna as 2 palavras mais relevantes (Subject + Action)
+  const top = sorted.slice(0, 2).map(([w]) => w.charAt(0).toUpperCase() + w.slice(1));
+  return top.join(' ');
 }
 
 const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#ec4899', '#f97316', '#6366f1', '#14b8a6'];
@@ -91,7 +104,9 @@ export default function App() {
   const [authError, setAuthError] = useState('');
   const [data, setData] = useState(null);
   const [temaSelecionado, setTemaSelecionado] = useState(null);
-  
+  const [abaAtiva, setAbaAtiva] = useState('dashboard');
+  const [buscaDetalhes, setBuscaDetalhes] = useState('');
+
   // Filtros do Dashboard
   const [filtroVertical, setFiltroVertical] = useState('Todas');
   const [filtroSistema, setFiltroSistema] = useState('Todos');
@@ -198,12 +213,7 @@ export default function App() {
 
   const chamadosDoTema = useMemo(() => {
     if (!temaSelecionado || !data?.rawCloud) return [];
-    let filtrados = data.rawCloud.filter(d => {
-      const t = (d.funcionalidade && d.funcionalidade.trim())
-        ? d.funcionalidade.trim()
-        : extrairTema(d.summary, d.description);
-      return t === temaSelecionado;
-    });
+    let filtrados = data.rawCloud.filter(d => d._tema === temaSelecionado);
     if (filtroVertical !== 'Todas') filtrados = filtrados.filter(d => d.vertical === filtroVertical);
     if (filtroSistema !== 'Todos') filtrados = filtrados.filter(d => d.sistema === filtroSistema);
     return filtrados;
@@ -225,8 +235,17 @@ export default function App() {
     });
     const topEntidades = Object.entries(entidadesMap)
       .sort((a, b) => b[1] - a[1])
-      .slice(0, 5)
+      .slice(0, 10)
       .map(([name, pedidos]) => ({ name, pedidos }));
+
+    // Chamado mais velho
+    const chamadoMaisVelho = cloud.reduce((oldest, d) => {
+      if (!d.created) return oldest;
+      return !oldest || new Date(d.created) < new Date(oldest.created) ? d : oldest;
+    }, null);
+    const idadeChamadoMaisVelho = chamadoMaisVelho
+      ? Math.floor((Date.now() - new Date(chamadoMaisVelho.created)) / (1000 * 60 * 60 * 24))
+      : null;
 
     // 3. Distribuição por Verticais
     const verticaisMap = {};
@@ -244,15 +263,18 @@ export default function App() {
       distribuicaoVertical = [...top, { name: 'Outras', value: restValue }];
     }
 
-    // 4. Agrupamento de Temas (Cloud) — prioriza funcionalidade, NLP como fallback
-    const LIMIAR_MINIMO = 3;
+    // 4. Agrupamento de Temas — pré-computa _tema em cada chamado (evita reprocessamento)
+    cloud.forEach(d => {
+      d._tema = (d.funcionalidade && d.funcionalidade.trim())
+        ? d.funcionalidade.trim()
+        : extrairTema(d.summary, d.description);
+    });
+
     const temasMap = {};
     cloud.forEach(d => {
       const v = d.vertical || 'Não informada';
       const s = d.sistema || 'Não informado';
-      const t = (d.funcionalidade && d.funcionalidade.trim())
-        ? d.funcionalidade.trim()
-        : extrairTema(d.summary, d.description);
+      const t = d._tema;
       const key = `${v}|${s}|${t}`;
       if (!temasMap[key]) {
         temasMap[key] = { vertical: v, sistema: s, tema: t, quantidade: 0 };
@@ -260,21 +282,7 @@ export default function App() {
       temasMap[key].quantidade += 1;
     });
 
-    // Agrupa temas com menos de 3 chamados em "Outros"
-    const outrosMap = {};
-    const temasConsolidados = {};
-    Object.values(temasMap).forEach(item => {
-      if (item.quantidade < LIMIAR_MINIMO) {
-        const outrosKey = `${item.vertical}|${item.sistema}|Outros`;
-        if (!outrosMap[outrosKey]) {
-          outrosMap[outrosKey] = { vertical: item.vertical, sistema: item.sistema, tema: 'Outros', quantidade: 0 };
-        }
-        outrosMap[outrosKey].quantidade += item.quantidade;
-      } else {
-        temasConsolidados[`${item.vertical}|${item.sistema}|${item.tema}`] = item;
-      }
-    });
-    const baseTemasCloud = [...Object.values(temasConsolidados), ...Object.values(outrosMap)]
+    const baseTemasCloud = Object.values(temasMap)
       .sort((a, b) => b.quantidade - a.quantidade);
 
     // 5. Atualizar Estado
@@ -287,6 +295,8 @@ export default function App() {
       distribuicaoVertical,
       baseTemasCloud,
       rawCloud: cloud,
+      chamadoMaisVelho,
+      idadeChamadoMaisVelho,
     });
     
     // Reseta filtros
@@ -333,7 +343,7 @@ export default function App() {
   return (
     <div className="min-h-screen bg-slate-50 p-6 font-sans text-slate-800">
       
-      <header className="mb-8 border-b border-slate-200 pb-4 flex justify-between items-end">
+      <header className="mb-6 border-b border-slate-200 pb-4 flex justify-between items-end">
         <div>
           <h1 className="text-3xl font-bold text-slate-900 flex items-center gap-3">
             <Activity className="h-8 w-8 text-indigo-600" />
@@ -351,6 +361,24 @@ export default function App() {
           </button>
         </div>
       </header>
+
+      {/* Navegação por abas */}
+      {data && (
+        <div className="flex gap-1 mb-6 border-b border-slate-200">
+          <button onClick={() => setAbaAtiva('dashboard')}
+            className={`px-5 py-2.5 text-sm font-semibold border-b-2 transition-colors ${abaAtiva === 'dashboard' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>
+            Dashboard
+          </button>
+          <button onClick={() => setAbaAtiva('detalhes')}
+            className={`px-5 py-2.5 text-sm font-semibold border-b-2 transition-colors ${abaAtiva === 'detalhes' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>
+            Detalhes dos Chamados
+          </button>
+        </div>
+      )}
+
+      {/* ABA DASHBOARD */}
+      {abaAtiva === 'dashboard' && (
+      <>
 
       {/* KPIs Principais */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
@@ -391,6 +419,21 @@ export default function App() {
         </div>
       </div>
 
+      {/* KPI Chamado mais velho */}
+      {data?.chamadoMaisVelho && (
+        <div className="bg-violet-50 border-l-4 border-violet-500 p-4 rounded-r-lg mb-8 flex items-center gap-3 shadow-sm">
+          <AlertTriangle className="h-5 w-5 text-violet-600 shrink-0" />
+          <p className="text-violet-800 text-sm">
+            <span className="font-bold">Chamado mais antigo:</span>{' '}
+            <a href={`https://atendimento.betha.com.br/browse/${data.chamadoMaisVelho.key}`}
+              target="_blank" rel="noopener noreferrer"
+              className="font-mono text-indigo-600 hover:underline">{data.chamadoMaisVelho.key}</a>
+            {' '}— {data.chamadoMaisVelho.summary?.substring(0, 80)}{data.chamadoMaisVelho.summary?.length > 80 ? '…' : ''}{' '}
+            <span className="font-bold text-violet-700">({data.idadeChamadoMaisVelho} dias em aberto)</span>
+          </p>
+        </div>
+      )}
+
       {data && data.totalDesktop > 0 && (
         <div className="bg-amber-50 border-l-4 border-amber-500 p-4 rounded-r-lg mb-8 flex items-start gap-3 shadow-sm">
           <AlertTriangle className="h-6 w-6 text-amber-600 shrink-0" />
@@ -406,16 +449,16 @@ export default function App() {
       {data && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
           <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-6 flex flex-col">
-            <h3 className="text-lg font-bold text-slate-800 mb-1">Top 5 Maiores Solicitantes (Cloud)</h3>
+            <h3 className="text-lg font-bold text-slate-800 mb-1">Top 10 Maiores Solicitantes (Cloud)</h3>
             <p className="text-sm text-slate-500 mb-4">Entidades com maior volume de tickets pendentes.</p>
-            <div className="flex-1 min-h-[280px]">
+            <div className="flex-1 min-h-[450px]">
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={data.topEntidades} layout="vertical" margin={{ top: 5, right: 30, left: 40, bottom: 5 }}>
+                <BarChart data={data.topEntidades} layout="vertical" margin={{ top: 5, right: 30, left: 200, bottom: 5 }}>
                   <CartesianGrid strokeDasharray="3 3" horizontal={true} vertical={false} stroke="#e2e8f0" />
                   <XAxis type="number" />
-                  <YAxis dataKey="name" type="category" width={120} tick={{fontSize: 12, fill: '#475569'}} />
+                  <YAxis dataKey="name" type="category" width={190} tick={{fontSize: 11, fill: '#475569'}} />
                   <RechartsTooltip cursor={{fill: '#f1f5f9'}} contentStyle={{borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)'}} />
-                  <Bar dataKey="pedidos" name="Total Pedidos" fill="#3b82f6" radius={[0, 4, 4, 0]} barSize={28} />
+                  <Bar dataKey="pedidos" name="Total Pedidos" fill="#3b82f6" radius={[0, 4, 4, 0]} barSize={32} />
                 </BarChart>
               </ResponsiveContainer>
             </div>
@@ -538,6 +581,69 @@ export default function App() {
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      </> 
+      )} {/* fim aba dashboard */}
+
+      {/* ABA DETALHES */}
+      {abaAtiva === 'detalhes' && data && (
+        <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-6">
+          <div className="flex flex-col md:flex-row gap-4 mb-5 items-start md:items-center justify-between">
+            <div>
+              <h3 className="text-lg font-bold text-slate-800">Todos os Chamados por Tema</h3>
+              <p className="text-sm text-slate-500 mt-1">{data.rawCloud.length.toLocaleString('pt-PT')} chamados · ordenados por tema</p>
+            </div>
+            <input
+              type="text"
+              placeholder="Buscar por chave, resumo, tema, sistema..."
+              value={buscaDetalhes}
+              onChange={e => setBuscaDetalhes(e.target.value)}
+              className="border border-slate-300 rounded-lg px-3 py-2 text-sm outline-none focus:border-indigo-500 w-full md:w-96"
+            />
+          </div>
+          <div className="overflow-auto max-h-[72vh] rounded-lg border border-slate-200">
+            <table className="w-full text-sm text-left">
+              <thead className="bg-slate-50 text-slate-600 sticky top-0 z-10">
+                <tr>
+                  <th className="px-4 py-2.5 font-semibold border-b border-slate-200 whitespace-nowrap">Chave</th>
+                  <th className="px-4 py-2.5 font-semibold border-b border-slate-200">Resumo</th>
+                  <th className="px-4 py-2.5 font-semibold border-b border-slate-200 whitespace-nowrap">Vertical</th>
+                  <th className="px-4 py-2.5 font-semibold border-b border-slate-200 whitespace-nowrap">Sistema</th>
+                  <th className="px-4 py-2.5 font-semibold border-b border-slate-200">Tema</th>
+                  <th className="px-4 py-2.5 font-semibold border-b border-slate-200 whitespace-nowrap">Entidade</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.rawCloud
+                  .filter(d => {
+                    if (!buscaDetalhes) return true;
+                    const q = buscaDetalhes.toLowerCase();
+                    return (d.key || '').toLowerCase().includes(q)
+                      || (d.summary || '').toLowerCase().includes(q)
+                      || (d._tema || '').toLowerCase().includes(q)
+                      || (d.vertical || '').toLowerCase().includes(q)
+                      || (d.sistema || '').toLowerCase().includes(q)
+                      || (d.entidade || '').toLowerCase().includes(q);
+                  })
+                  .sort((a, b) => (a._tema || '').localeCompare(b._tema || '', 'pt'))
+                  .map((d, idx) => (
+                    <tr key={d.key || idx} className={idx % 2 === 0 ? 'bg-white hover:bg-slate-50' : 'bg-slate-50 hover:bg-slate-100'}>
+                      <td className="px-4 py-2 font-mono text-xs whitespace-nowrap">
+                        <a href={`https://atendimento.betha.com.br/browse/${d.key}`} target="_blank" rel="noopener noreferrer"
+                          className="text-indigo-600 hover:text-indigo-800 hover:underline">{d.key}</a>
+                      </td>
+                      <td className="px-4 py-2 text-slate-700 max-w-xs truncate" title={d.summary}>{d.summary}</td>
+                      <td className="px-4 py-2 text-slate-600 whitespace-nowrap">{d.vertical}</td>
+                      <td className="px-4 py-2 text-slate-600 whitespace-nowrap">{d.sistema}</td>
+                      <td className="px-4 py-2 text-slate-600 whitespace-nowrap text-xs font-medium">{d._tema}</td>
+                      <td className="px-4 py-2 text-slate-500 whitespace-nowrap text-xs">{d.entidade}</td>
+                    </tr>
+                  ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 
