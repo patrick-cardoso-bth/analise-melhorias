@@ -447,21 +447,6 @@ export default function App() {
         </div>
       </div>
 
-      {/* KPI Chamado mais velho */}
-      {data?.chamadoMaisVelho && (
-        <div className="bg-violet-50 border-l-4 border-violet-500 p-4 rounded-r-lg mb-8 flex items-center gap-3 shadow-sm">
-          <AlertTriangle className="h-5 w-5 text-violet-600 shrink-0" />
-          <p className="text-violet-800 text-sm">
-            <span className="font-bold">Chamado mais antigo:</span>{' '}
-            <a href={`https://atendimento.betha.com.br/browse/${data.chamadoMaisVelho.key}`}
-              target="_blank" rel="noopener noreferrer"
-              className="font-mono text-indigo-600 hover:underline">{data.chamadoMaisVelho.key}</a>
-            {' '}— {data.chamadoMaisVelho.summary?.substring(0, 80)}{data.chamadoMaisVelho.summary?.length > 80 ? '…' : ''}{' '}
-            <span className="font-bold text-violet-700">({data.idadeChamadoMaisVelho} dias em aberto)</span>
-          </p>
-        </div>
-      )}
-
       {data && data.totalDesktop > 0 && (
         <div className="bg-amber-50 border-l-4 border-amber-500 p-4 rounded-r-lg mb-8 flex items-start gap-3 shadow-sm">
           <AlertTriangle className="h-6 w-6 text-amber-600 shrink-0" />
