@@ -470,7 +470,7 @@ export default function App() {
                   <CartesianGrid strokeDasharray="3 3" horizontal={true} vertical={false} stroke="#e2e8f0" />
                   <XAxis type="number" />
                   <YAxis dataKey="name" type="category" width={190} tick={{fontSize: 11, fill: '#475569'}} />
-                  <CustomTooltipTopEntidades />
+                  <RechartsTooltip cursor={{fill: '#f1f5f9'}} content={<CustomTooltipTopEntidades />} />
                   <Bar dataKey="pedidos" name="Total Pedidos" fill="#3b82f6" radius={[0, 4, 4, 0]} barSize={32} />
                 </BarChart>
               </ResponsiveContainer>
