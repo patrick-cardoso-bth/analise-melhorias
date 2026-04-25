@@ -98,6 +98,23 @@ const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4'
 
 const VERTICAIS_EXCLUIDAS = new Set(['sistemas internos', 'não informada', 'plataforma']);
 
+// Tooltip personalizado para Top 10 com idade do chamado mais velho
+function CustomTooltipTopEntidades({ active, payload }) {
+  if (active && payload && payload[0]) {
+    const data = payload[0].payload;
+    return (
+      <div className="bg-white p-3 rounded-lg border border-slate-200 shadow-lg text-xs">
+        <p className="font-semibold text-slate-800">{data.name}</p>
+        <p className="text-indigo-600">Total: {data.pedidos} chamados</p>
+        {data.idadeChamadoMaisVelho !== null && (
+          <p className="text-amber-600 font-semibold">Mais antigo: {data.idadeChamadoMaisVelho} dias</p>
+        )}
+      </div>
+    );
+  }
+  return null;
+}
+
 export default function App() {
   const [user, setUser] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
@@ -229,14 +246,25 @@ export default function App() {
 
     // 2. Ranking de Entidades (Cloud)
     const entidadesMap = {};
+    const entidadesChamadoMaisVelho = {};
     cloud.forEach(d => {
       const e = d.entidade || 'Não informada';
       entidadesMap[e] = (entidadesMap[e] || 0) + 1;
+      // Rastrear chamado mais velho por entidade
+      if (!entidadesChamadoMaisVelho[e] || (d.created && new Date(d.created) < new Date(entidadesChamadoMaisVelho[e].created))) {
+        entidadesChamadoMaisVelho[e] = d;
+      }
     });
     const topEntidades = Object.entries(entidadesMap)
       .sort((a, b) => b[1] - a[1])
       .slice(0, 10)
-      .map(([name, pedidos]) => ({ name, pedidos }));
+      .map(([name, pedidos]) => {
+        const chamadoVelho = entidadesChamadoMaisVelho[name];
+        const idadeVelho = chamadoVelho && chamadoVelho.created
+          ? Math.floor((Date.now() - new Date(chamadoVelho.created)) / (1000 * 60 * 60 * 24))
+          : null;
+        return { name, pedidos, idadeChamadoMaisVelho: idadeVelho };
+      });
 
     // Chamado mais velho
     const chamadoMaisVelho = cloud.reduce((oldest, d) => {
@@ -265,7 +293,7 @@ export default function App() {
 
     // 4. Agrupamento de Temas — pré-computa _tema em cada chamado (evita reprocessamento)
     cloud.forEach(d => {
-      d._tema = (d.funcionalidade && d.funcionalidade.trim())
+      d._tema = (d.funcionalidade && d.funcionalidade.trim() && d.funcionalidade.trim() !== 'Nova rotina')
         ? d.funcionalidade.trim()
         : extrairTema(d.summary, d.description);
     });
@@ -457,7 +485,7 @@ export default function App() {
                   <CartesianGrid strokeDasharray="3 3" horizontal={true} vertical={false} stroke="#e2e8f0" />
                   <XAxis type="number" />
                   <YAxis dataKey="name" type="category" width={190} tick={{fontSize: 11, fill: '#475569'}} />
-                  <RechartsTooltip cursor={{fill: '#f1f5f9'}} contentStyle={{borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)'}} />
+                  <CustomTooltipTopEntidades />
                   <Bar dataKey="pedidos" name="Total Pedidos" fill="#3b82f6" radius={[0, 4, 4, 0]} barSize={32} />
                 </BarChart>
               </ResponsiveContainer>
@@ -592,8 +620,8 @@ export default function App() {
         <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-6">
           <div className="flex flex-col md:flex-row gap-4 mb-5 items-start md:items-center justify-between">
             <div>
-              <h3 className="text-lg font-bold text-slate-800">Todos os Chamados por Tema</h3>
-              <p className="text-sm text-slate-500 mt-1">{data.rawCloud.length.toLocaleString('pt-PT')} chamados · ordenados por tema</p>
+              <h3 className="text-lg font-bold text-slate-800">Todos os Chamados — Agrupado por Vertical, Sistema e Tema</h3>
+              <p className="text-sm text-slate-500 mt-1">{data.rawCloud.length.toLocaleString('pt-PT')} chamados</p>
             </div>
             <input
               type="text"
@@ -603,46 +631,104 @@ export default function App() {
               className="border border-slate-300 rounded-lg px-3 py-2 text-sm outline-none focus:border-indigo-500 w-full md:w-96"
             />
           </div>
-          <div className="overflow-auto max-h-[72vh] rounded-lg border border-slate-200">
-            <table className="w-full text-sm text-left">
-              <thead className="bg-slate-50 text-slate-600 sticky top-0 z-10">
-                <tr>
-                  <th className="px-4 py-2.5 font-semibold border-b border-slate-200 whitespace-nowrap">Chave</th>
-                  <th className="px-4 py-2.5 font-semibold border-b border-slate-200">Resumo</th>
-                  <th className="px-4 py-2.5 font-semibold border-b border-slate-200 whitespace-nowrap">Vertical</th>
-                  <th className="px-4 py-2.5 font-semibold border-b border-slate-200 whitespace-nowrap">Sistema</th>
-                  <th className="px-4 py-2.5 font-semibold border-b border-slate-200">Tema</th>
-                  <th className="px-4 py-2.5 font-semibold border-b border-slate-200 whitespace-nowrap">Entidade</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.rawCloud
-                  .filter(d => {
-                    if (!buscaDetalhes) return true;
-                    const q = buscaDetalhes.toLowerCase();
-                    return (d.key || '').toLowerCase().includes(q)
-                      || (d.summary || '').toLowerCase().includes(q)
-                      || (d._tema || '').toLowerCase().includes(q)
-                      || (d.vertical || '').toLowerCase().includes(q)
-                      || (d.sistema || '').toLowerCase().includes(q)
-                      || (d.entidade || '').toLowerCase().includes(q);
-                  })
-                  .sort((a, b) => (a._tema || '').localeCompare(b._tema || '', 'pt'))
-                  .map((d, idx) => (
-                    <tr key={d.key || idx} className={idx % 2 === 0 ? 'bg-white hover:bg-slate-50' : 'bg-slate-50 hover:bg-slate-100'}>
-                      <td className="px-4 py-2 font-mono text-xs whitespace-nowrap">
-                        <a href={`https://atendimento.betha.com.br/browse/${d.key}`} target="_blank" rel="noopener noreferrer"
-                          className="text-indigo-600 hover:text-indigo-800 hover:underline">{d.key}</a>
-                      </td>
-                      <td className="px-4 py-2 text-slate-700 max-w-xs truncate" title={d.summary}>{d.summary}</td>
-                      <td className="px-4 py-2 text-slate-600 whitespace-nowrap">{d.vertical}</td>
-                      <td className="px-4 py-2 text-slate-600 whitespace-nowrap">{d.sistema}</td>
-                      <td className="px-4 py-2 text-slate-600 whitespace-nowrap text-xs font-medium">{d._tema}</td>
-                      <td className="px-4 py-2 text-slate-500 whitespace-nowrap text-xs">{d.entidade}</td>
-                    </tr>
-                  ))}
-              </tbody>
-            </table>
+          <div className="space-y-3 max-h-[72vh] overflow-auto rounded-lg">
+            {(() => {
+              // Agrupar por Vertical > Sistema > Tema
+              const agrupado = {};
+              data.rawCloud.forEach(d => {
+                const vertical = d.vertical || 'Não informada';
+                const sistema = d.sistema || 'Não informado';
+                const tema = d._tema || 'Sem tema';
+                
+                if (!agrupado[vertical]) agrupado[vertical] = {};
+                if (!agrupado[vertical][sistema]) agrupado[vertical][sistema] = {};
+                if (!agrupado[vertical][sistema][tema]) agrupado[vertical][sistema][tema] = [];
+                agrupado[vertical][sistema][tema].push(d);
+              });
+              
+              // Renderizar estrutura hierárquica
+              return Object.entries(agrupado).map(([vertical, sistemas]) => (
+                <div key={vertical} className="border border-slate-200 rounded-lg overflow-hidden">
+                  <div className="bg-slate-100 px-4 py-3 font-bold text-slate-800 flex items-center gap-2">
+                    <span>📊 {vertical} ({Object.values(sistemas).reduce((sum, temas) => sum + Object.values(temas).reduce((s, chamados) => s + chamados.length, 0), 0)} chamados)</span>
+                  </div>
+                  <div className="bg-white">
+                    {Object.entries(sistemas).map(([sistema, temas]) => (
+                      <div key={sistema} className="border-t border-slate-200">
+                        <div className="bg-slate-50 px-6 py-2 font-semibold text-slate-700 flex items-center gap-2 text-sm">
+                          <span>→ {sistema} ({Object.values(temas).reduce((sum, chamados) => sum + chamados.length, 0)} chamados)</span>
+                        </div>
+                        <div className="bg-white">
+                          {Object.entries(temas).map(([tema, chamados]) => {
+                            const chamadoMaisVelho = chamados.reduce((oldest, d) => {
+                              if (!d.created) return oldest;
+                              return !oldest || new Date(d.created) < new Date(oldest.created) ? d : oldest;
+                            }, null);
+                            const idadeVelho = chamadoMaisVelho && chamadoMaisVelho.created
+                              ? Math.floor((Date.now() - new Date(chamadoMaisVelho.created)) / (1000 * 60 * 60 * 24))
+                              : null;
+                            
+                            const filtroCumpre = !buscaDetalhes || chamados.some(d => {
+                              const q = buscaDetalhes.toLowerCase();
+                              return (d.key || '').toLowerCase().includes(q)
+                                || (d.summary || '').toLowerCase().includes(q)
+                                || (d._tema || '').toLowerCase().includes(q)
+                                || (d.vertical || '').toLowerCase().includes(q)
+                                || (d.sistema || '').toLowerCase().includes(q)
+                                || (d.entidade || '').toLowerCase().includes(q);
+                            });
+                            
+                            if (!filtroCumpre) return null;
+                            
+                            return (
+                              <div key={tema} className="border-l-4 border-indigo-300 bg-indigo-50 px-6 py-3 text-sm">
+                                <div className="font-semibold text-indigo-900 mb-2 flex items-center justify-between">
+                                  <span>🏷️ {tema} ({chamados.length} chamados)</span>
+                                  {idadeVelho && (
+                                    <span className="text-xs font-normal text-indigo-700 bg-indigo-100 px-2 py-1 rounded">Mais antigo: {idadeVelho} dias</span>
+                                  )}
+                                </div>
+                                <div className="overflow-x-auto">
+                                  <table className="w-full text-xs">
+                                    <thead>
+                                      <tr className="bg-indigo-100">
+                                        <th className="px-2 py-1 text-left font-semibold text-indigo-800">Chave</th>
+                                        <th className="px-2 py-1 text-left font-semibold text-indigo-800">Resumo</th>
+                                        <th className="px-2 py-1 text-left font-semibold text-indigo-800 whitespace-nowrap">Entidade</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody>
+                                      {chamados.filter(d => {
+                                        if (!buscaDetalhes) return true;
+                                        const q = buscaDetalhes.toLowerCase();
+                                        return (d.key || '').toLowerCase().includes(q)
+                                          || (d.summary || '').toLowerCase().includes(q)
+                                          || (d._tema || '').toLowerCase().includes(q)
+                                          || (d.vertical || '').toLowerCase().includes(q)
+                                          || (d.sistema || '').toLowerCase().includes(q)
+                                          || (d.entidade || '').toLowerCase().includes(q);
+                                      }).map((d, idx) => (
+                                        <tr key={d.key || idx} className={idx % 2 === 0 ? 'bg-white' : 'bg-indigo-50 bg-opacity-50'}>
+                                          <td className="px-2 py-1 font-mono text-indigo-600 whitespace-nowrap">
+                                            <a href={`https://atendimento.betha.com.br/browse/${d.key}`} target="_blank" rel="noopener noreferrer" className="hover:text-indigo-800 hover:underline">{d.key}</a>
+                                          </td>
+                                          <td className="px-2 py-1 text-slate-700 truncate max-w-md" title={d.summary}>{d.summary}</td>
+                                          <td className="px-2 py-1 text-slate-500 whitespace-nowrap">{d.entidade}</td>
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  </table>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ));
+            })()}
           </div>
         </div>
       )}
