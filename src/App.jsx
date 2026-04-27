@@ -245,26 +245,61 @@ export default function App() {
     cloud = cloud.filter(d => !VERTICAIS_EXCLUIDAS.has((d.vertical || '').toLowerCase().trim()));
 
     // 2. Ranking de Entidades (Cloud)
+    // Siglas Betha: chamados com key iniciando nestas siglas são exibidos individualmente
+    const BETHA_SIGLAS = ['BTHSC', 'FCSC', 'FCRSC', 'FCPR', 'FLGC', 'FPSC', 'FRSSC', 'FCSRS', 'FUMG', 'UACSC'];
+    const classificarChamado = (key) => {
+      if (!key) return 'revenda';
+      const k = key.toUpperCase();
+      if (k.startsWith('PB')) return 'parceiro';
+      for (const sigla of BETHA_SIGLAS) {
+        if (k.startsWith(sigla)) return 'betha';
+      }
+      return 'revenda';
+    };
+
     const entidadesMap = {};
+    const bethaEntidadesMap = {};
     const entidadesChamadoMaisVelho = {};
+    let revendaCount = 0, parceiroCount = 0;
+    let revendaMaisVelho = null, parceiroMaisVelho = null;
+
     cloud.forEach(d => {
       const e = d.entidade || 'Não informada';
       entidadesMap[e] = (entidadesMap[e] || 0) + 1;
-      // Rastrear chamado mais velho por entidade
-      if (!entidadesChamadoMaisVelho[e] || (d.created && new Date(d.created) < new Date(entidadesChamadoMaisVelho[e].created))) {
-        entidadesChamadoMaisVelho[e] = d;
+      const tipo = classificarChamado(d.key);
+      if (tipo === 'betha') {
+        bethaEntidadesMap[e] = (bethaEntidadesMap[e] || 0) + 1;
+        if (!entidadesChamadoMaisVelho[e] || (d.created && new Date(d.created) < new Date(entidadesChamadoMaisVelho[e].created))) {
+          entidadesChamadoMaisVelho[e] = d;
+        }
+      } else if (tipo === 'parceiro') {
+        parceiroCount++;
+        if (!parceiroMaisVelho || (d.created && new Date(d.created) < new Date(parceiroMaisVelho.created))) {
+          parceiroMaisVelho = d;
+        }
+      } else {
+        revendaCount++;
+        if (!revendaMaisVelho || (d.created && new Date(d.created) < new Date(revendaMaisVelho.created))) {
+          revendaMaisVelho = d;
+        }
       }
     });
-    const topEntidades = Object.entries(entidadesMap)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 10)
-      .map(([name, pedidos]) => {
-        const chamadoVelho = entidadesChamadoMaisVelho[name];
-        const idadeVelho = chamadoVelho && chamadoVelho.created
-          ? Math.floor((Date.now() - new Date(chamadoVelho.created)) / (1000 * 60 * 60 * 24))
-          : null;
-        return { name, pedidos, idadeChamadoMaisVelho: idadeVelho };
-      });
+
+    const calcIdade = (d) => d && d.created
+      ? Math.floor((Date.now() - new Date(d.created)) / (1000 * 60 * 60 * 24))
+      : null;
+
+    const candidatos = [
+      ...Object.entries(bethaEntidadesMap).map(([name, pedidos]) => ({
+        name, pedidos, idadeChamadoMaisVelho: calcIdade(entidadesChamadoMaisVelho[name])
+      })),
+      ...(revendaCount > 0 ? [{ name: '🏪 Revendas', pedidos: revendaCount, idadeChamadoMaisVelho: calcIdade(revendaMaisVelho) }] : []),
+      ...(parceiroCount > 0 ? [{ name: '🤝 Parceiros', pedidos: parceiroCount, idadeChamadoMaisVelho: calcIdade(parceiroMaisVelho) }] : []),
+    ];
+
+    const topEntidades = candidatos
+      .sort((a, b) => b.pedidos - a.pedidos)
+      .slice(0, 10);
 
     // Chamado mais velho
     const chamadoMaisVelho = cloud.reduce((oldest, d) => {
