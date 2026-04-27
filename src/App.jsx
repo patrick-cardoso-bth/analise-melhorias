@@ -283,15 +283,9 @@ export default function App() {
       verticaisMap[vertical] = (verticaisMap[vertical] || 0) + 1;
     });
 
-    let distribuicao = Object.entries(verticaisMap)
+    const distribuicao = Object.entries(verticaisMap)
       .sort((a, b) => b[1] - a[1])
       .map(([name, value]) => ({ name, value }));
-
-    if (distribuicao.length > 7) {
-      const top = distribuicao.slice(0, 6);
-      const restValue = distribuicao.slice(6).reduce((acc, curr) => acc + curr.value, 0);
-      distribuicao = [...top, { name: 'Outras', value: restValue }];
-    }
 
     const total = distribuicao.reduce((acc, item) => acc + item.value, 0);
     return distribuicao.map((item) => ({
@@ -580,18 +574,47 @@ export default function App() {
                 </select>
               </div>
             </div>
-            <div className="flex-1 min-h-[350px]">
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie data={distribuicaoVerticalFiltrada} cx="50%" cy="50%" innerRadius={75} outerRadius={105} paddingAngle={4} dataKey="value" label={({ percentual }) => `${percentual}%`}>
-                    {distribuicaoVerticalFiltrada.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                    ))}
-                  </Pie>
-                  <RechartsTooltip content={<CustomTooltipDistribuicaoVertical />} />
-                  <Legend verticalAlign="bottom" height={36} iconType="circle" />
-                </PieChart>
-              </ResponsiveContainer>
+            <div className="flex flex-col lg:flex-row gap-6 flex-1 min-h-[380px]">
+              <div className="flex-1 min-h-[300px]">
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie data={distribuicaoVerticalFiltrada} cx="50%" cy="50%" innerRadius={75} outerRadius={105} paddingAngle={4} dataKey="value" label={({ percentual }) => `${percentual}%`}>
+                      {distribuicaoVerticalFiltrada.map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                      ))}
+                    </Pie>
+                    <RechartsTooltip content={<CustomTooltipDistribuicaoVertical />} />
+                    <Legend verticalAlign="bottom" height={36} iconType="circle" />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+              <div className="lg:w-72 shrink-0">
+                <div className="overflow-auto rounded-lg border border-slate-200 bg-slate-50 h-full">
+                  <table className="w-full text-xs text-left sticky top-0">
+                    <thead className="bg-slate-100 text-slate-600 border-b border-slate-200 sticky top-0">
+                      <tr>
+                        <th className="px-3 py-2 font-semibold">Vertical</th>
+                        <th className="px-3 py-2 font-semibold text-center">Chamados</th>
+                        <th className="px-3 py-2 font-semibold text-right">%</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {distribuicaoVerticalFiltrada.map((item, idx) => (
+                        <tr key={item.name} className={idx % 2 === 0 ? 'bg-white' : 'bg-slate-50 border-b border-slate-200'}>
+                          <td className="px-3 py-2 font-medium text-slate-700 truncate" title={item.name}>{item.name}</td>
+                          <td className="px-3 py-2 text-center text-slate-600">{item.value}</td>
+                          <td className="px-3 py-2 text-right text-slate-600">{item.percentual}%</td>
+                        </tr>
+                      ))}
+                      <tr className="bg-indigo-50 border-t-2 border-slate-300 font-bold">
+                        <td className="px-3 py-2 text-slate-800">TOTAL</td>
+                        <td className="px-3 py-2 text-center text-slate-800">{distribuicaoVerticalFiltrada.reduce((sum, item) => sum + item.value, 0)}</td>
+                        <td className="px-3 py-2 text-right text-slate-800">100.0%</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
             </div>
           </div>
         </div>
