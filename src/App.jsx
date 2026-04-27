@@ -580,40 +580,18 @@ export default function App() {
                 </select>
               </div>
             </div>
-            <div className="flex flex-col xl:flex-row gap-4 flex-1 min-h-[320px]">
-              <div className="flex-1 min-h-[280px]">
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie data={distribuicaoVerticalFiltrada} cx="50%" cy="50%" innerRadius={75} outerRadius={105} paddingAngle={4} dataKey="value">
-                      {distribuicaoVerticalFiltrada.map((entry, index) => (
-                        <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                      ))}
-                    </Pie>
-                    <RechartsTooltip content={<CustomTooltipDistribuicaoVertical />} />
-                    <Legend verticalAlign="bottom" height={36} iconType="circle" />
-                  </PieChart>
-                </ResponsiveContainer>
-              </div>
-              <div className="xl:w-52 shrink-0 rounded-lg border border-slate-200 bg-slate-50 p-3">
-                <p className="text-[10px] font-bold text-slate-500 uppercase mb-3">Resumo fixo</p>
-                <div className="space-y-2 max-h-[280px] overflow-auto pr-1">
-                  {distribuicaoVerticalFiltrada.map((item, index) => (
-                    <div key={item.name} className="rounded-lg border border-slate-200 bg-white p-2">
-                      <div className="flex items-start gap-2">
-                        <span className="mt-1 h-2.5 w-2.5 rounded-full" style={{ backgroundColor: COLORS[index % COLORS.length] }} />
-                        <div className="min-w-0 flex-1">
-                          <p className="text-xs font-semibold text-slate-700 truncate" title={item.name}>{item.name}</p>
-                          <p className="text-xs text-slate-500">{item.value} chamados</p>
-                          <p className="text-xs font-medium text-indigo-600">{item.percentual}%</p>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                  {distribuicaoVerticalFiltrada.length === 0 && (
-                    <p className="text-xs text-slate-400">Nenhum dado encontrado para o filtro selecionado.</p>
-                  )}
-                </div>
-              </div>
+            <div className="flex-1 min-h-[350px]">
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie data={distribuicaoVerticalFiltrada} cx="50%" cy="50%" innerRadius={75} outerRadius={105} paddingAngle={4} dataKey="value" label={({ percentual }) => `${percentual}%`}>
+                    {distribuicaoVerticalFiltrada.map((entry, index) => (
+                      <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                    ))}
+                  </Pie>
+                  <RechartsTooltip content={<CustomTooltipDistribuicaoVertical />} />
+                  <Legend verticalAlign="bottom" height={36} iconType="circle" />
+                </PieChart>
+              </ResponsiveContainer>
             </div>
           </div>
         </div>
@@ -694,18 +672,20 @@ export default function App() {
                     <tr>
                       <th className="px-4 py-2 font-semibold border-b border-slate-200">Chave</th>
                       <th className="px-4 py-2 font-semibold border-b border-slate-200">Resumo</th>
+                      <th className="px-4 py-2 font-semibold border-b border-slate-200">Data de Criação</th>
                       <th className="px-4 py-2 font-semibold border-b border-slate-200">Vertical</th>
                       <th className="px-4 py-2 font-semibold border-b border-slate-200">Sistema</th>
                       <th className="px-4 py-2 font-semibold border-b border-slate-200">Entidade</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {chamadosDoTema.map((chamado, idx) => (
+                    {[...chamadosDoTema].sort((a, b) => new Date(a.created) - new Date(b.created)).map((chamado, idx) => (
                       <tr key={chamado.key || idx} className={idx % 2 === 0 ? 'bg-white' : 'bg-slate-50'}>
                         <td className="px-4 py-2 font-mono text-xs whitespace-nowrap">
                           <a href={`https://atendimento.betha.com.br/browse/${chamado.key}`} target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:text-indigo-800 hover:underline">{chamado.key}</a>
                         </td>
                         <td className="px-4 py-2 text-slate-700 max-w-xs truncate" title={chamado.summary}>{chamado.summary}</td>
+                        <td className="px-4 py-2 text-slate-600 whitespace-nowrap">{new Date(chamado.created).toLocaleDateString('pt-PT')}</td>
                         <td className="px-4 py-2 text-slate-600 whitespace-nowrap">{chamado.vertical}</td>
                         <td className="px-4 py-2 text-slate-600 whitespace-nowrap">{chamado.sistema}</td>
                         <td className="px-4 py-2 text-slate-600 whitespace-nowrap">{chamado.entidade}</td>
