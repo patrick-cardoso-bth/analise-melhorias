@@ -97,6 +97,17 @@ function extrairTema(summary, description) {
 const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#ec4899', '#f97316', '#6366f1', '#14b8a6'];
 
 const VERTICAIS_EXCLUIDAS = new Set(['sistemas internos', 'não informada', 'plataforma']);
+const BETHA_SIGLAS = ['BTHSC', 'FCSC', 'FCRSC', 'FCPR', 'FLGC', 'FPSC', 'FRSSC', 'FCSRS', 'FUMG', 'UACSC'];
+
+function classificarChamado(key) {
+  if (!key) return 'revenda';
+  const k = key.toUpperCase();
+  if (k.startsWith('PB')) return 'parceiro';
+  for (const sigla of BETHA_SIGLAS) {
+    if (k.startsWith(sigla)) return 'betha';
+  }
+  return 'revenda';
+}
 
 // Tooltip personalizado para Top 10 com idade do chamado mais velho
 function CustomTooltipTopEntidades({ active, payload }) {
@@ -115,6 +126,20 @@ function CustomTooltipTopEntidades({ active, payload }) {
   return null;
 }
 
+function CustomTooltipDistribuicaoVertical({ active, payload }) {
+  if (active && payload && payload[0]) {
+    const data = payload[0].payload;
+    return (
+      <div className="bg-white p-3 rounded-lg border border-slate-200 shadow-lg text-xs">
+        <p className="font-semibold text-slate-800">{data.name}</p>
+        <p className="text-indigo-600">Quantidade: {data.value} chamados</p>
+        <p className="text-slate-600">Percentual: {data.percentual}%</p>
+      </div>
+    );
+  }
+  return null;
+}
+
 export default function App() {
   const [user, setUser] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
@@ -127,6 +152,7 @@ export default function App() {
   // Filtros do Dashboard
   const [filtroVertical, setFiltroVertical] = useState('Todas');
   const [filtroSistema, setFiltroSistema] = useState('Todos');
+  const [filtroClientes, setFiltroClientes] = useState('Todos');
 
   // Auth: verificar sessão salva ao montar
   useEffect(() => {
@@ -236,6 +262,44 @@ export default function App() {
     return filtrados;
   }, [temaSelecionado, filtroVertical, filtroSistema, data]);
 
+  const distribuicaoVerticalFiltrada = useMemo(() => {
+    if (!data?.rawCloud) return [];
+
+    let filtrados = data.rawCloud;
+    if (filtroClientes !== 'Todos') {
+      filtrados = filtrados.filter((d) => {
+        const tipo = classificarChamado(d.key);
+        return filtroClientes === 'Betha'
+          ? tipo === 'betha'
+          : filtroClientes === 'Parceiros'
+            ? tipo === 'parceiro'
+            : tipo === 'revenda';
+      });
+    }
+
+    const verticaisMap = {};
+    filtrados.forEach((d) => {
+      const vertical = d.vertical || 'Não informada';
+      verticaisMap[vertical] = (verticaisMap[vertical] || 0) + 1;
+    });
+
+    let distribuicao = Object.entries(verticaisMap)
+      .sort((a, b) => b[1] - a[1])
+      .map(([name, value]) => ({ name, value }));
+
+    if (distribuicao.length > 7) {
+      const top = distribuicao.slice(0, 6);
+      const restValue = distribuicao.slice(6).reduce((acc, curr) => acc + curr.value, 0);
+      distribuicao = [...top, { name: 'Outras', value: restValue }];
+    }
+
+    const total = distribuicao.reduce((acc, item) => acc + item.value, 0);
+    return distribuicao.map((item) => ({
+      ...item,
+      percentual: total > 0 ? ((item.value / total) * 100).toFixed(1) : '0.0',
+    }));
+  }, [data, filtroClientes]);
+
   const processData = (parsedData) => {
     // 1. Isolar Sistemas Desktop
     const desktop = parsedData.filter(d => d.sistema && d.sistema.toLowerCase().includes('desktop'));
@@ -245,18 +309,6 @@ export default function App() {
     cloud = cloud.filter(d => !VERTICAIS_EXCLUIDAS.has((d.vertical || '').toLowerCase().trim()));
 
     // 2. Ranking de Entidades (Cloud)
-    // Siglas Betha: chamados com key iniciando nestas siglas são exibidos individualmente
-    const BETHA_SIGLAS = ['BTHSC', 'FCSC', 'FCRSC', 'FCPR', 'FLGC', 'FPSC', 'FRSSC', 'FCSRS', 'FUMG', 'UACSC'];
-    const classificarChamado = (key) => {
-      if (!key) return 'revenda';
-      const k = key.toUpperCase();
-      if (k.startsWith('PB')) return 'parceiro';
-      for (const sigla of BETHA_SIGLAS) {
-        if (k.startsWith(sigla)) return 'betha';
-      }
-      return 'revenda';
-    };
-
     const entidadesMap = {};
     const bethaEntidadesMap = {};
     const entidadesChamadoMaisVelho = {};
@@ -513,20 +565,55 @@ export default function App() {
           </div>
 
           <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-6 flex flex-col">
-            <h3 className="text-lg font-bold text-slate-800 mb-1">Distribuição de Pedidos por Vertical</h3>
-            <p className="text-sm text-slate-500 mb-4">Volume concentrado por grande área de negócio.</p>
-            <div className="flex-1 min-h-[280px]">
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie data={data.distribuicaoVertical} cx="50%" cy="50%" innerRadius={75} outerRadius={105} paddingAngle={4} dataKey="value">
-                    {data.distribuicaoVertical.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                    ))}
-                  </Pie>
-                  <RechartsTooltip contentStyle={{borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)'}} />
-                  <Legend verticalAlign="bottom" height={36} iconType="circle" />
-                </PieChart>
-              </ResponsiveContainer>
+            <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4 mb-4">
+              <div>
+                <h3 className="text-lg font-bold text-slate-800 mb-1">Distribuição de Pedidos por Vertical</h3>
+                <p className="text-sm text-slate-500">Volume concentrado por grande área de negócio.</p>
+              </div>
+              <div className="flex flex-col">
+                <label className="text-[10px] font-bold text-slate-500 uppercase mb-1">Clientes</label>
+                <select value={filtroClientes} onChange={(e) => setFiltroClientes(e.target.value)} className="text-sm bg-white border border-slate-300 rounded px-2 py-1 outline-none focus:border-indigo-500 w-40">
+                  <option value="Todos">Todos</option>
+                  <option value="Revendas">Revendas</option>
+                  <option value="Parceiros">Parceiros</option>
+                  <option value="Betha">Betha</option>
+                </select>
+              </div>
+            </div>
+            <div className="flex flex-col xl:flex-row gap-4 flex-1 min-h-[320px]">
+              <div className="flex-1 min-h-[280px]">
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie data={distribuicaoVerticalFiltrada} cx="50%" cy="50%" innerRadius={75} outerRadius={105} paddingAngle={4} dataKey="value">
+                      {distribuicaoVerticalFiltrada.map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                      ))}
+                    </Pie>
+                    <RechartsTooltip content={<CustomTooltipDistribuicaoVertical />} />
+                    <Legend verticalAlign="bottom" height={36} iconType="circle" />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+              <div className="xl:w-52 shrink-0 rounded-lg border border-slate-200 bg-slate-50 p-3">
+                <p className="text-[10px] font-bold text-slate-500 uppercase mb-3">Resumo fixo</p>
+                <div className="space-y-2 max-h-[280px] overflow-auto pr-1">
+                  {distribuicaoVerticalFiltrada.map((item, index) => (
+                    <div key={item.name} className="rounded-lg border border-slate-200 bg-white p-2">
+                      <div className="flex items-start gap-2">
+                        <span className="mt-1 h-2.5 w-2.5 rounded-full" style={{ backgroundColor: COLORS[index % COLORS.length] }} />
+                        <div className="min-w-0 flex-1">
+                          <p className="text-xs font-semibold text-slate-700 truncate" title={item.name}>{item.name}</p>
+                          <p className="text-xs text-slate-500">{item.value} chamados</p>
+                          <p className="text-xs font-medium text-indigo-600">{item.percentual}%</p>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                  {distribuicaoVerticalFiltrada.length === 0 && (
+                    <p className="text-xs text-slate-400">Nenhum dado encontrado para o filtro selecionado.</p>
+                  )}
+                </div>
+              </div>
             </div>
           </div>
         </div>
